@@ -7,6 +7,7 @@ import html
 import json
 import os
 import shutil
+from urllib.parse import quote
 
 import cv2
 import numpy as np
@@ -109,6 +110,8 @@ def _write_html(out_dir: str, video: str, rows: list[dict], info: dict) -> None:
             f'</figcaption></figure>')
     n_dup = info.get("duplicates_skipped", 0)
     dups = f" (дублей не сохранено: {n_dup})" if n_dup else ""
+    pdf = info.get("pdf")
+    pdf_link = f' · <a href="{html.escape(quote(pdf))}">все слайды в PDF</a>' if pdf else ""
     layout = '<img class="layout" src="layout.png" alt="найденная область">' \
         if os.path.exists(os.path.join(out_dir, "layout.png")) else ""
     page = f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
@@ -128,7 +131,7 @@ figure img {{ width:100%; display:block; }} figcaption {{ padding:10px 12px; }}
 </style></head><body>
 <h1>{html.escape(os.path.basename(video))}</h1>
 <div class="muted">Слайдов: {len(rows)}{dups} · длительность {fmt_time(info.get("duration", 0))} ·
-обработано за {info.get("processing_seconds", 0):.0f} с</div>
+обработано за {info.get("processing_seconds", 0):.0f} с{pdf_link}</div>
 {layout}
 <div class="grid">{''.join(cards)}</div>
 </body></html>"""

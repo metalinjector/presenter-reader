@@ -50,6 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "повторного показа добавляется к исходному слайду в отчёте")
     ap.add_argument("--duplicate-threshold", type=float, default=95.0, metavar="%",
                     help="с какого процента сходства повтор считается дублем (по умолчанию 95)")
+    ap.add_argument("--pdf", action="store_true",
+                    help="собрать все скриншоты по порядку показа в один PDF "
+                         "(<видео>_slides.pdf в папке результата); картинки кладутся в PDF "
+                         "без пересжатия — пиксели те же, что в PNG")
     ap.add_argument("--no-merge-builds", action="store_true",
                     help="не склеивать пошаговую анимацию: каждый шаг — отдельный скриншот")
     ap.add_argument("--mode", choices=["auto", "keyframes", "sequential"], default="auto",
@@ -108,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     params = Params(min_duration=args.min_duration, sensitivity=args.sensitivity,
                     similar_threshold=args.similar, merge_builds=not args.no_merge_builds,
                     skip_duplicates=args.skip_duplicates, duplicate_threshold=args.duplicate_threshold,
-                    mode=args.mode, roi=args.roi, start=args.start, end=args.end,
+                    pdf=args.pdf, mode=args.mode, roi=args.roi, start=args.start, end=args.end,
                     backend=args.backend, keep_temp=args.keep_temp)
     code = 0
     for video in args.videos:
@@ -132,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
         n_dup = res.info.get("duplicates_skipped", 0)
         dups = f" (дублей не сохранено: {n_dup})" if n_dup else ""
         print(f"Найдено слайдов: {len(res.slides)}{dups}  →  {res.out_dir}")
+        if res.pdf:
+            print(f"PDF со всеми слайдами: {res.pdf}")
         for s, f in zip(res.slides, res.files):
             extra = f"  (повтор №{s.repeat_of}, сходство {s.similarity:.0f}%)" if s.repeat_of else ""
             if s.appearances > 1:

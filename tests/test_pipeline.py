@@ -72,3 +72,22 @@ def test_skip_duplicates(mini_video, tmp_path):
         rep = json.load(fh)
     assert rep["skip_duplicates"] is True and rep["duplicates_skipped"] == n_rep
     assert rep["slides"][0]["appearances"] == 2
+
+
+def test_pdf(mini_video, tmp_path):
+    from tests.test_pdf import pdf_pages, png_idat
+    path, gt = mini_video
+    out = tmp_path / "out"
+    res = process(path, str(out), Params(pdf=True))
+    assert res.pdf == str(out / "mini_slides.pdf") and os.path.exists(res.pdf)
+    with open(out / "report.json", encoding="utf-8") as fh:
+        assert json.load(fh)["pdf"] == "mini_slides.pdf"
+    # страницы — скриншоты в порядке показа, байт в байт как в PNG
+    streams = [stream for _, _, stream in pdf_pages(res.pdf)]
+    assert streams == [png_idat(out / f) for f in res.files]
+    assert len(streams) == len(gt["screens"])
+    # без PDF в той же папке — PDF прошлой обработки удаляется, чтобы не путать
+    res = process(path, str(out), Params())
+    assert res.pdf is None and not os.path.exists(out / "mini_slides.pdf")
+    with open(out / "report.json", encoding="utf-8") as fh:
+        assert json.load(fh)["pdf"] is None
