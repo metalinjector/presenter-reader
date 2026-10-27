@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from .imageops import block_mean, max_sum_rectangle, structure_map
+from .imageops import block_mean, block_sum, downscale, max_sum_rectangle, structure_map
 
 _K3 = np.ones((3, 3), np.uint8)
 
@@ -133,12 +133,11 @@ class Survey:
         self.full: list[np.ndarray] = []      # несколько кадров в полном размере
 
     def _small(self, luma: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        raw = cv2.resize(luma, (self.sw, self.sh), interpolation=cv2.INTER_AREA)
+        raw = downscale(luma, (self.sw, self.sh))
         return raw, cv2.GaussianBlur(raw, (3, 3), 0)
 
     def _blocks(self, ch: np.ndarray) -> np.ndarray:
-        cnt = ch.reshape(self.bh, self.block, self.bw, self.block).sum(axis=(1, 3))
-        return cnt >= self.ev_px
+        return block_sum(ch, self.block) >= self.ev_px
 
     def add(self, t: float, luma: np.ndarray, kind: str = "key") -> None:
         raw, s = self._small(luma)
@@ -189,12 +188,20 @@ class Survey:
         lay.dyn, lay.glob = D, G
         lay.debug.update(events=E, glob=G, n_bursts=len(self.bursts))
 
-        # попиксельная карта «живых» зон (для подгонки краёв)
+        # Точная (попиксельная) карта постоянно «живых» окон — для подгонки краёв.
+        # Блочная карта G надёжно находит окна камер, но грубая (блок 12 px и запас
+        # в блок). Уточняем: внутри G берём пиксели, которые хоть иногда менялись,
+        # и каждое пятно дополняем до прямоугольника.
         if len(self.bursts) >= 3:
-            dyn_px = self.act_short >= 0.5 * len(self.bursts)
+            act = self.act_short.astype(np.float32) / len(self.bursts)
         else:
-            dyn_px = self.act >= 0.5 * max(1, K)
-        dyn_px = cv2.morphologyEx(dyn_px.astype(np.uint8), cv2.MORPH_OPEN, _K3) > 0
+            act = self.act.astype(np.float32) / max(1, K)
+        b = self.block
+        g_px = np.kron(G.astype(np.uint8), np.ones((b, b), np.uint8)) > 0 if G is not None \
+            else np.zeros(act.shape, bool)
+        live = (g_px & (act >= 0.1)).astype(np.uint8)
+        live = cv2.morphologyEx(live, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+        dyn_px = _rectangularize(live, min_fill=0.0) if live.any() else live > 0
         lay.debug["dyn_px"] = dyn_px
 
         if roi is not None:

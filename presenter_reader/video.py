@@ -66,6 +66,11 @@ class Frame:
                 self._luma = cv2.cvtColor(self._bgr, cv2.COLOR_BGR2GRAY)
         return self._luma
 
+    @property
+    def is_key(self) -> bool:
+        """Опорный кадр (I-кадр): самое чистое качество, без следов прошлых кадров."""
+        return bool(self._av is not None and self._av.key_frame)
+
     def bgr(self) -> np.ndarray:
         """Полноцветный кадр (H×W×3, BGR) — нужен только для скриншотов."""
         if self._bgr is None:
@@ -222,7 +227,7 @@ class AVSource:
                         last = t
                     feed_until = None
                     if burst > 0 and t is not None and t - last_burst >= burst_every:
-                        feed_until = t + burst + 0.3
+                        feed_until = t + burst + 0.15
                         last_burst = t
                         burst_keys.add(pkt.pts)
                 elif feed_until is not None:

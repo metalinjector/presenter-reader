@@ -16,6 +16,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import cv2
+import numpy as np
+
 from .imageops import Comparator
 from .tracker import Run
 
@@ -80,7 +83,9 @@ def assemble(runs: list[Run], cmp: Comparator, min_duration: float, merge_builds
         g = groups[-1] if groups else None
         if g is not None and r.t_start - g.t_end <= merge_gap:
             mask = _mask(g.run, r)
-            if cmp.is_same(r.ref, g.run.ref, mask):
+            d = cmp.diff(r.ref, g.run.ref, mask)
+            # мелкое отличие (остановившийся курсор, след перехода) — тот же слайд
+            if cmp.same(d) or cmp.minor(d):
                 g.shows.append((r.t_start, r.t_end))
                 if r.duration > g.run.duration:   # кадр берём из более долгого показа
                     g.run = r
@@ -96,10 +101,22 @@ def assemble(runs: list[Run], cmp: Comparator, min_duration: float, merge_builds
                 continue
         groups.append(Slide(0, r, [(r.t_start, r.t_end)]))
 
+    # Повторы: сравниваем с каждым ранее показанным слайдом. Чтобы на сотнях
+    # слайдов не делать N² полных сравнений, сначала отбираем кандидатов по
+    # крошечным миниатюрам 64×36, а точный процент сходства считаем для трёх
+    # самых близких.
+    thumbs = np.stack([cv2.resize(g.run.ref, (64, 36), interpolation=cv2.INTER_AREA)
+                       for g in groups]).astype(np.int16) if groups else None
     for i, s in enumerate(groups):
         s.number = i + 1
+        if i == 0:
+            continue
+        dist = np.abs(thumbs[:i] - thumbs[i]).mean(axis=(1, 2))
         best, best_sim = None, -1.0
-        for prev in groups[:i]:
+        for j in np.argsort(dist)[:3]:
+            if dist[j] > 40:
+                break
+            prev = groups[int(j)]
             sim = cmp.similarity(s.run.ref, prev.run.ref, _mask(prev.run, s.run))
             if sim > best_sim:
                 best, best_sim = prev, sim

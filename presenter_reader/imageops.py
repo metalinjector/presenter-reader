@@ -24,8 +24,17 @@ def block_sum(binary: np.ndarray, block: int) -> np.ndarray:
     """Число единиц в каждом блоке block×block (хвосты обрезаются)."""
     h, w = binary.shape
     hb, wb = h // block, w // block
-    b = binary[: hb * block, : wb * block]
-    return b.reshape(hb, block, wb, block).sum(axis=(1, 3), dtype=np.int32)
+    b = binary[: hb * block, : wb * block].astype(np.float32)
+    m = cv2.resize(b, (wb, hb), interpolation=cv2.INTER_AREA)   # среднее по блоку
+    return np.rint(m * (block * block)).astype(np.int32)
+
+
+def downscale(img: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """Уменьшение с усреднением (как INTER_AREA), но каскадом через половинки — в разы быстрее."""
+    w, h = size
+    while img.shape[1] >= 2 * w and img.shape[0] >= 2 * h:
+        img = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2), interpolation=cv2.INTER_AREA)
+    return cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
 
 
 def block_mean(img: np.ndarray, block: int) -> np.ndarray:

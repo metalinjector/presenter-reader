@@ -8,19 +8,22 @@
 
 Для скриншота прогона сохраняется несколько полноцветных кадров, взятых в
 разные моменты (номера выборок 0, 1, 2, 4, 8, 16, …, хранятся три последних).
-Итоговое изображение — их поэлементная медиана: курсор, который двигался,
+Опорные кадры (I-кадры) в приоритете: в промежуточных кадрах после плавного
+перехода сжатие ещё несколько секунд держит бледный след прошлого слайда.
+Итоговое изображение — поэлементная медиана: курсор, который двигался,
 пропадает, а шум сжатия усредняется.
 """
 
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
 
-from .imageops import Comparator, median_image
+from .imageops import Comparator, downscale, median_image
 from .layout import Layout
 from .video import Frame
 
@@ -35,7 +38,9 @@ class Run:
     n: int = 1
     n_busy: int = 0
     t_end: float = 0.0
-    caps: list = field(default_factory=list)
+    caps: list = field(default_factory=list)       # кадры для скриншота (любые)
+    key_caps: list = field(default_factory=list)   # кадры для скриншота (опорные)
+    n_key: int = 0
     first: list = field(default_factory=list)   # первые выборки — для эталона без курсора
     image_path: str | None = None
     flat: float = 1.0
@@ -64,7 +69,7 @@ class Analyzer:
     def image(self, frame: Frame) -> np.ndarray:
         x, y, w, h = self.rect
         crop = frame.luma()[y:y + h, x:x + w]
-        small = cv2.resize(crop, self.size, interpolation=cv2.INTER_AREA)
+        small = downscale(crop, self.size)
         # лёгкое размытие гасит «звон» сжатия на краях букв (разница I- и P-кадров)
         return cv2.GaussianBlur(small, (3, 3), 0)
 
@@ -121,6 +126,8 @@ class Tracker:
         # небольшое изменение «под подозрением»: курсор или правка? (t, a, mask, busy, frame, diff)
         self.pending = None
         os.makedirs(tmp_dir, exist_ok=True)
+        self._writer = ThreadPoolExecutor(max_workers=2)   # PNG пишем в фоне
+        self._writes = []
 
     def push(self, frame: Frame, a: np.ndarray | None = None) -> None:
         t = frame.t
@@ -169,7 +176,7 @@ class Tracker:
 
     def _open(self, t, a, mask, busy, frame, *_):
         run = Run(len(self.runs), t, t, a, mask, n_busy=int(busy), first=[a])
-        self._capture(run, frame)
+        self._capture(run, frame, 0)
         self.cur = run
 
     def _extend(self, cur: Run, t, a, busy, frame) -> None:
@@ -183,14 +190,24 @@ class Tracker:
                 # «хвост» плавного перехода, если они попали в первую выборку
                 cur.ref = median_image(cur.first)
                 cur.first = []
-        k = cur.n - 1
-        if k & (k - 1) == 0:  # 1, 2, 4, 8, …
-            self._capture(cur, frame)
+        self._capture(cur, frame, cur.n - 1)
 
-    def _capture(self, run: Run, frame: Frame) -> None:
-        run.caps.append(self.an.crop_color(frame))
-        if len(run.caps) > self.keep_caps:
-            run.caps.pop(0)
+    def _capture(self, run: Run, frame: Frame, k: int) -> None:
+        """Кадры для скриншота: выборки № 0, 1, 2, 4, 8, … и так же опорные кадры."""
+        if frame.is_key:
+            j = run.n_key
+            run.n_key += 1
+            if j & (j - 1) == 0:
+                run.key_caps.append(self.an.crop_color(frame))
+                if len(run.key_caps) > self.keep_caps:
+                    run.key_caps.pop(0)
+            return
+        if run.key_caps:
+            return  # опорные кадры уже есть — промежуточные не нужны
+        if k & (k - 1) == 0:
+            run.caps.append(self.an.crop_color(frame))
+            if len(run.caps) > self.keep_caps:
+                run.caps.pop(0)
 
     def _close(self, t_end: float) -> None:
         run = self.cur
@@ -198,13 +215,16 @@ class Tracker:
             return
         run.t_end = t_end
         run.flat = flatness(run.ref)
-        if run.duration >= self.min_duration and run.caps:
-            caps = run.caps if len(run.caps) >= 3 else run.caps[-1:]
+        caps = run.key_caps or run.caps
+        if run.duration >= self.min_duration and caps:
+            caps = caps if len(caps) >= 3 else caps[-1:]
             img = median_image(caps)
             path = os.path.join(self.tmp_dir, f"run_{run.idx:06d}.png")
-            cv2.imwrite(path, img, [cv2.IMWRITE_PNG_COMPRESSION, 3])
+            self._writes.append(self._writer.submit(
+                cv2.imwrite, path, img, [cv2.IMWRITE_PNG_COMPRESSION, 3]))
             run.image_path = path
         run.caps = []
+        run.key_caps = []
         run.first = []
         self.runs.append(run)
         self.cur = None
@@ -212,4 +232,8 @@ class Tracker:
     def finish(self, t_end: float) -> list[Run]:
         if self.cur is not None:
             self._close(max(t_end, self.cur.t_last))
+        for f in self._writes:
+            f.result()
+        self._writes = []
+        self._writer.shutdown()
         return self.runs

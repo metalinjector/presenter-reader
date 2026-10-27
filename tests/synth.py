@@ -76,6 +76,7 @@ class Scenario:
     timeline: list = field(default_factory=list)   # Shown | ("camera", dur)
     cursor_periods: list = field(default_factory=list)
     background: tuple[int, int, int] = (30, 30, 30)
+    extra_cams: list = field(default_factory=list)    # ещё окна камер (галерея)
 
 
 # ---------------------------------------------------------------- отрисовка
@@ -234,6 +235,27 @@ def make_scenario(name: str, seed: int = 0) -> Scenario:
                        Shown(2, full(2), 20, fade=0.5), Shown(3, full(3), 18), Shown(4, full(4), 16),
                        Shown(1, full(1), 10), Shown(5, full(5), 18, fade=0.5), Shown(6, full(6), 15)]
         sc.cursor_periods = [(20, 40), (100, 130)]
+    elif name == "dark43":
+        # слайды 4:3 в тёмной теме по центру, чёрные поля слева/справа, камера
+        # слева сверху, в середине — быстрое листание по 2–3 секунды
+        slides = _deck(9, seed + 50, themes=("dark",))
+        sc = Scenario(name, W, H, (280, 0, 960, 720), (8, 8, 256, 144), None, slides,
+                      background=(12, 12, 12))
+        full = lambda i: len(slides[i].bullets)  # noqa: E731
+        sc.timeline = [Shown(0, full(0), 15), Shown(1, full(1), 14, fade=0.4),
+                       Shown(2, full(2), 3), Shown(3, full(3), 2.5), Shown(4, full(4), 3),
+                       Shown(5, full(5), 2), Shown(6, full(6), 16), Shown(2, full(2), 12),
+                       Shown(7, full(7), 14, fade=0.4), Shown(8, full(8), 12)]
+        sc.cursor_periods = [(5, 12), (60, 75)]
+    elif name == "teams":
+        # низкое разрешение, слайд сверху слева, внизу полоса из трёх камер
+        slides = _deck(6, seed + 60, themes=("light", "blue"))
+        sc = Scenario(name, W, H, (160, 20, 960, 540), (160, 575, 300, 140), None, slides,
+                      background=(40, 36, 32))
+        sc.extra_cams = [(490, 575, 300, 140), (820, 575, 300, 140)]
+        sc.timeline = [Shown(i, len(slides[i].bullets), d, fade=f) for i, d, f in
+                       [(0, 16, 0), (1, 18, 0.5), (2, 12, 0), (3, 20, 0.6), (4, 15, 0), (5, 14, 0.4)]]
+        sc.cursor_periods = [(20, 35)]
     elif name == "mixed":
         slides = _deck(6, seed + 40)
         sc = Scenario(name, W, H, (0, 90, 960, 540), (970, 10, 300, 169), None, slides)
@@ -291,6 +313,7 @@ def render(sc: Scenario, out_path: str, fps: float = 15, gop_seconds: float = 2.
     sx, sy, sw, sh = sc.slide_rect
     rng = random.Random(seed)
     cam = Webcam(sc.cam_rect[2], sc.cam_rect[3], seed) if sc.cam_rect else None
+    extra = [(r, Webcam(r[2], r[3], seed + 11 + i)) for i, r in enumerate(sc.extra_cams)]
     bigcam = Webcam(W, H, seed + 5)
     chat = Chat(sc.chat_rect[2], sc.chat_rect[3], total, seed) if sc.chat_rect else None
 
@@ -363,6 +386,8 @@ def render(sc: Scenario, out_path: str, fps: float = 15, gop_seconds: float = 2.
             if cam is not None:
                 cx, cy, cw, ch = sc.cam_rect
                 frame[cy:cy + ch, cx:cx + cw] = cam.frame(tt)
+            for (ex, ey, ew, eh), ecam in extra:
+                frame[ey:ey + eh, ex:ex + ew] = ecam.frame(tt + 3.7)
             if chat is not None:
                 qx, qy, qw, qh = sc.chat_rect
                 frame[qy:qy + qh, qx:qx + qw] = chat.frame(tt)
@@ -387,13 +412,42 @@ def main():
     ap.add_argument("--gop", type=float, default=2.0)
     ap.add_argument("--bframes", type=int, default=0)
     ap.add_argument("--crf", type=int, default=28)
+    ap.add_argument("--size", default=None, help="итоговый размер кадра, например 854x480")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
-    names = ["zoom", "pip", "web", "mixed"] if args.scenario == "all" else [args.scenario]
+    names = ["zoom", "pip", "web", "mixed", "dark43", "teams"] if args.scenario == "all" \
+        else args.scenario.split(",")
     for n in names:
         path = os.path.join(args.out_dir, f"{n}_g{args.gop:g}_b{args.bframes}.mp4")
         gt = render(make_scenario(n), path, args.fps, args.gop, args.bframes, args.crf)
-        print(f"{path}: {gt['duration']:.0f} s, unique slides = {gt['unique_slides']}")
+        if args.size:
+            gt = rescale(path, gt, args.size, args.gop, args.bframes, args.crf, args.fps)
+        print(f"{path}: {gt['duration']:.0f} s, screens = {len(gt['screens'])}")
+
+
+def rescale(path: str, gt: dict, size: str, gop: float, bframes: int, crf: int, fps: float) -> dict:
+    """Перекодировать видео в другой размер кадра и пересчитать эталонные прямоугольники."""
+    w, h = (int(v) for v in size.lower().split("x"))
+    kx, ky = w / gt["width"], h / gt["height"]
+    tmp = path + ".tmp.mp4"
+    g = max(1, int(round(gop * fps)))
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-vf", f"scale={w}:{h}",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf), "-g", str(g),
+                    "-keyint_min", str(g), "-sc_threshold", "0", "-bf", str(bframes),
+                    "-pix_fmt", "yuv420p", tmp], check=True)
+    os.replace(tmp, path)
+
+    def sc_rect(r):
+        x, y, rw, rh = r
+        return [round(x * kx), round(y * ky), round((x + rw) * kx) - round(x * kx),
+                round((y + rh) * ky) - round(y * ky)]
+    gt["slide_rect"] = sc_rect(gt["slide_rect"])
+    if gt.get("cam_rect"):
+        gt["cam_rect"] = sc_rect(gt["cam_rect"])
+    gt["width"], gt["height"] = w, h
+    with open(os.path.splitext(path)[0] + ".json", "w", encoding="utf-8") as f:
+        json.dump(gt, f, ensure_ascii=False, indent=1)
+    return gt
 
 
 if __name__ == "__main__":
