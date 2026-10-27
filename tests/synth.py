@@ -446,7 +446,7 @@ def main():
     ap.add_argument("--size", default=None, help="итоговый размер кадра, например 854x480")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
-    names = ["zoom", "pip", "web", "mixed", "dark43", "teams"] if args.scenario == "all" \
+    names = ["zoom", "pip", "web", "mixed", "dark43", "teams", "toast"] if args.scenario == "all" \
         else args.scenario.split(",")
     for n in names:
         path = os.path.join(args.out_dir, f"{n}_g{args.gop:g}_b{args.bframes}.mp4")

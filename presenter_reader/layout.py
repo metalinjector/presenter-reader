@@ -326,7 +326,10 @@ class _DSU:
 def _event_region(E, D, G, debug) -> tuple[int, int, int, int] | None:
     """Прямоугольник (в блоках) самой большой согласованно меняющейся области."""
     K, bh, bw = E.shape
-    Em = E & ~D & ~G[None]
+    # Вокруг постоянно «живых» окон (камеры) тоже не доверяем событиям: туда долетает
+    # шум и движения, а узкие промежутки между соседними окнами камер так закрываются.
+    Gx = cv2.dilate(G.astype(np.uint8), _K3) > 0 if G.any() else G
+    Em = E & ~D & ~Gx[None]
     # Периоды, когда «живёт» заметная часть кадра (ведущий на весь экран, галерея
     # участников), выбрасываем целиком вместе с соседними парами: там меняется всё
     # подряд, и такие изменения склеили бы слайд с интерфейсом вокруг.
@@ -387,11 +390,17 @@ def _event_region(E, D, G, debug) -> tuple[int, int, int, int] | None:
             if ev_n[j] < 1:
                 continue
             inter = int((series[i] & series[j]).sum())
-            if inter / max(ev_n[i], ev_n[j]) < 0.4:
+            gap = _box_gap(boxes[i], boxes[j])
+            if gap > gap_max:
                 continue
-            if _box_gap(boxes[i], boxes[j]) > gap_max:
-                continue
-            g.union(i, j)
+            similar = inter / max(ev_n[i], ev_n[j]) >= 0.4
+            # Редко меняющаяся часть слайда (низ, куда текст доходит не на каждом
+            # слайде) меняется только вместе с частой — её история почти целиком
+            # входит в историю частой. Склеиваем, если части соприкасаются.
+            nested = gap <= 1 and min(ev_n[i], ev_n[j]) >= 2 and \
+                inter / min(ev_n[i], ev_n[j]) >= 0.75
+            if similar or nested:
+                g.union(i, j)
     groups: dict[int, list[int]] = {}
     for i in range(len(comps_l)):
         groups.setdefault(g.find(i), []).append(i)

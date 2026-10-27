@@ -7,3 +7,8 @@ dist/
 *_slides/
 .runs_tmp/
 .pytest_cache/
+demo/
+vids/
+gui.png
+gui_smoke.png
+.venv*/
