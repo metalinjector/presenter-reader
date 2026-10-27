@@ -2,4 +2,6 @@
 
 __version__ = "0.1.0"
 
-from .pipeline import Cancelled, Params, Result, process  # noqa: E402,F401
+from .pipeline import Cancelled, Params, Result, process  # noqa: E402
+
+__all__ = ["Cancelled", "Params", "Result", "process", "__version__"]

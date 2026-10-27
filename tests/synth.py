@@ -235,6 +235,15 @@ def make_scenario(name: str, seed: int = 0) -> Scenario:
                        Shown(2, full(2), 20, fade=0.5), Shown(3, full(3), 18), Shown(4, full(4), 16),
                        Shown(1, full(1), 10), Shown(5, full(5), 18, fade=0.5), Shown(6, full(6), 15)]
         sc.cursor_periods = [(20, 40), (100, 130)]
+    elif name == "mini":
+        # короткий ролик для автотестов: анимация, повтор, курсор, камера сбоку
+        slides = _deck(4, seed + 70)
+        slides[1].bullets = slides[1].bullets[:3] + ["Итог раздела"] * (3 - len(slides[1].bullets[:3]))
+        sc = Scenario(name, W, H, (0, 90, 960, 540), (970, 10, 300, 169), None, slides)
+        full = lambda i: len(slides[i].bullets)  # noqa: E731
+        sc.timeline = [Shown(0, full(0), 6), Shown(1, 1, 4), Shown(1, full(1), 6, fade=0.4),
+                       Shown(2, full(2), 6), Shown(0, full(0), 5), Shown(3, full(3), 6, fade=0.4)]
+        sc.cursor_periods = [(7, 12)]
     elif name == "dark43":
         # слайды 4:3 в тёмной теме по центру, чёрные поля слева/справа, камера
         # слева сверху, в середине — быстрое листание по 2–3 секунды

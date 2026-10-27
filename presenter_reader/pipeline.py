@@ -13,7 +13,7 @@ import numpy as np
 
 from .imageops import Comparator
 from .layout import Layout, Survey
-from .report import draw_layout, save_slides, write_reports
+from .report import draw_layout, plural, save_slides, write_reports
 from .slides import Slide, assemble
 from .tracker import Analyzer, Tracker, _combine
 from .video import open_video
@@ -117,57 +117,68 @@ def process(video: str, out_dir: str | None = None, params: Params | None = None
         os.makedirs(out_dir, exist_ok=True)
         tmp = os.path.join(out_dir, ".runs_tmp")
         tracker = Tracker(an, cmp, tmp, p.min_duration)
-        text = "Ищу смены слайдов…"
-        if use_keys:
-            prev = None
-            for fr in src.keyframes(min_interval=max(p.fine_step, 0.5) * 0.99,
-                                    start=start_arg, end=t_hi):
-                a = an.image(fr)
-                if prev is not None and fr.t - prev[0] > 1.5 * p.fine_step:
-                    m = _combine(an.mask(fr.t)[0], an.mask(prev[0])[0])
-                    if not cmp.is_same(a, prev[1], m):
-                        # между опорными кадрами что-то поменялось — разбираем интервал подробно
-                        for ff in src.frames(prev[0], fr.t, p.fine_step):
-                            tracker.push(ff)
-                            report(0.3 + 0.65 * (ff.t - t_lo) / span, text)
-                tracker.push(fr, a)
-                prev = (fr.t, a)
-                report(0.3 + 0.65 * (fr.t - t_lo) / span, text)
-        else:
-            for fr in src.sequential(p.fine_step, start=start_arg, end=t_hi):
-                tracker.push(fr)
-                report(0.3 + 0.65 * (fr.t - t_lo) / span, text)
-        runs = tracker.finish(t_hi)
+        try:
+            runs = _extract(src, tracker, an, cmp, p, use_keys, start_arg, t_lo, t_hi, span, report)
 
-        # ---------------------------------------------- 3. сборка и сохранение
-        report(0.96, "Сохраняю слайды…")
-        slides = assemble(runs, cmp, p.min_duration, p.merge_builds, p.similar_threshold)
-        for f in os.listdir(out_dir):
-            if _OWN_FILE.match(f):
-                os.remove(os.path.join(out_dir, f))
-        files = save_slides(slides, out_dir, t0=info.start)
-        _save_layout_preview(src, layout, slides, out_dir, t_lo, t_hi)
-        seconds = time.perf_counter() - t_begin
-        meta = {
-            "duration": round(span, 2),
-            "start": info.start,
-            "frame_size": [info.width, info.height],
-            "codec": info.codec,
-            "backend": src.backend,
-            "mode": mode,
-            "keyframe_interval": ki,
-            "region": {"x": layout.rect[0], "y": layout.rect[1], "w": layout.rect[2],
-                       "h": layout.rect[3], "method": layout.method},
-            "processing_seconds": round(seconds, 1),
-            "runs_total": len(runs),
-        }
-        write_reports(out_dir, video, slides, files, meta)
-        if not p.keep_temp:
-            shutil.rmtree(tmp, ignore_errors=True)
-        report(1.0, f"Готово: {len(slides)} слайдов")
+            # ------------------------------------------ 3. сборка и сохранение
+            report(0.96, "Сохраняю слайды…")
+            slides = assemble(runs, cmp, p.min_duration, p.merge_builds, p.similar_threshold)
+            for f in os.listdir(out_dir):
+                if _OWN_FILE.match(f):
+                    os.remove(os.path.join(out_dir, f))
+            files = save_slides(slides, out_dir, t0=info.start)
+            _save_layout_preview(src, layout, slides, out_dir, t_lo, t_hi)
+            seconds = time.perf_counter() - t_begin
+            meta = {
+                "duration": round(span, 2),
+                "start": info.start,
+                "frame_size": [info.width, info.height],
+                "codec": info.codec,
+                "backend": src.backend,
+                "mode": mode,
+                "keyframe_interval": ki,
+                "region": {"x": layout.rect[0], "y": layout.rect[1], "w": layout.rect[2],
+                           "h": layout.rect[3], "method": layout.method},
+                "processing_seconds": round(seconds, 1),
+                "runs_total": len(runs),
+            }
+            write_reports(out_dir, video, slides, files, meta)
+        except BaseException:
+            tracker.abort()
+            raise
+        finally:
+            if not p.keep_temp:
+                shutil.rmtree(tmp, ignore_errors=True)
+        if progress is not None:
+            progress(1.0, f"Готово: {len(slides)} " + plural(len(slides), "слайд", "слайда", "слайдов"))
         return Result(video, out_dir, slides, files, layout, mode, seconds, meta)
     finally:
         src.close()
+
+
+def _extract(src, tracker, an, cmp, p: Params, use_keys, start_arg, t_lo, t_hi, span, report):
+    """Проход по видео: опорные кадры + подробный разбор интервалов, где что-то поменялось."""
+    text = "Ищу смены слайдов…"
+    if use_keys:
+        prev = None
+        for fr in src.keyframes(min_interval=max(p.fine_step, 0.5) * 0.99,
+                                start=start_arg, end=t_hi):
+            a = an.image(fr)
+            if prev is not None and fr.t - prev[0] > 1.5 * p.fine_step:
+                m = _combine(an.mask(fr.t)[0], an.mask(prev[0])[0])
+                if not cmp.is_same(a, prev[1], m):
+                    # между опорными кадрами что-то поменялось — разбираем интервал подробно
+                    for ff in src.frames(prev[0], fr.t, p.fine_step):
+                        tracker.push(ff)
+                        report(0.3 + 0.65 * (ff.t - t_lo) / span, text)
+            tracker.push(fr, a)
+            prev = (fr.t, a)
+            report(0.3 + 0.65 * (fr.t - t_lo) / span, text)
+    else:
+        for fr in src.sequential(p.fine_step, start=start_arg, end=t_hi):
+            tracker.push(fr)
+            report(0.3 + 0.65 * (fr.t - t_lo) / span, text)
+    return tracker.finish(t_hi)
 
 
 def _save_layout_preview(src, layout: Layout, slides: list[Slide], out_dir: str,

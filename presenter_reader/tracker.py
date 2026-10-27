@@ -229,6 +229,13 @@ class Tracker:
         self.runs.append(run)
         self.cur = None
 
+    def abort(self) -> None:
+        """Остановка без результата: дождаться фоновой записи и закрыть пул."""
+        for f in self._writes:
+            f.exception()
+        self._writes = []
+        self._writer.shutdown()
+
     def finish(self, t_end: float) -> list[Run]:
         if self.cur is not None:
             self._close(max(t_end, self.cur.t_last))

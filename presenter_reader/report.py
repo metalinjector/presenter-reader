@@ -19,6 +19,16 @@ def fmt_time(t: float, sep: str = ":") -> str:
     return f"{t // 3600:02d}{sep}{t % 3600 // 60:02d}{sep}{t % 60:02d}"
 
 
+def plural(n: int, one: str, few: str, many: str) -> str:
+    """Склонение по числу: 1 слайд, 2 слайда, 5 слайдов."""
+    n10, n100 = n % 10, n % 100
+    if n10 == 1 and n100 != 11:
+        return one
+    if 2 <= n10 <= 4 and not 12 <= n100 <= 14:
+        return few
+    return many
+
+
 def slide_filename(s: Slide, t0: float) -> str:
     name = f"slide_{s.number:03d}_{fmt_time(s.t_start - t0, '-')}"
     if s.repeat_of is not None:
