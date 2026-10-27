@@ -12,6 +12,7 @@ import numpy as np
 
 from .imageops import Comparator, write_png
 from .layout import Layout, Survey
+from .pdf import write_pdf
 from .report import draw_layout, plural, save_slides, write_reports
 from .slides import Slide, assemble, drop_duplicates
 from .tracker import Analyzer, Tracker, _combine
@@ -31,6 +32,7 @@ class Params:
     similar_threshold: float = 80.0  # с какого сходства, %, помечать повтор
     skip_duplicates: bool = False    # не сохранять дубли — почти неотличимые повторы
     duplicate_threshold: float = 95.0  # с какого сходства, %, повтор считается дублем
+    pdf: bool = False                # собрать все скриншоты по порядку показа в один PDF
     mode: str = "auto"               # auto | keyframes | sequential
     max_keyframe_gap: float = 20.0   # реже опорных кадров — читаем всё подряд
     survey_samples: int = 3000       # сколько выборок брать для поиска области
@@ -59,6 +61,7 @@ class Result:
     mode: str
     seconds: float
     info: dict = field(default_factory=dict)
+    pdf: str | None = None           # путь к PDF со всеми слайдами, если он собран
 
 
 _OWN_FILE = re.compile(r"^slide_\d{3}_.*\.png$")
@@ -67,6 +70,11 @@ _OWN_FILE = re.compile(r"^slide_\d{3}_.*\.png$")
 def default_out_dir(video: str) -> str:
     stem = os.path.splitext(os.path.basename(video))[0]
     return os.path.join(os.path.dirname(os.path.abspath(video)), stem + "_slides")
+
+
+def pdf_filename(video: str) -> str:
+    """Имя PDF со всеми слайдами: «<имя видео>_slides.pdf»."""
+    return os.path.splitext(os.path.basename(video))[0] + "_slides.pdf"
 
 
 def process(video: str, out_dir: str | None = None, params: Params | None = None,
@@ -127,10 +135,16 @@ def process(video: str, out_dir: str | None = None, params: Params | None = None
             n_dup = 0
             if p.skip_duplicates:
                 slides, n_dup = drop_duplicates(slides, p.duplicate_threshold)
-            for f in os.listdir(out_dir):
-                if _OWN_FILE.match(f):
+            pdf_name = pdf_filename(video)
+            for f in os.listdir(out_dir):        # результаты прошлой обработки этого видео
+                if _OWN_FILE.match(f) or f in (pdf_name, pdf_name + ".part"):
                     os.remove(os.path.join(out_dir, f))
             files = save_slides(slides, out_dir, t0=info.start)
+            if p.pdf and files:
+                write_pdf([os.path.join(out_dir, f) for f in files], os.path.join(out_dir, pdf_name),
+                          title=os.path.splitext(os.path.basename(video))[0])
+            else:
+                pdf_name = None
             _save_layout_preview(src, layout, slides, out_dir, t_lo, t_hi)
             seconds = time.perf_counter() - t_begin
             meta = {
@@ -147,6 +161,7 @@ def process(video: str, out_dir: str | None = None, params: Params | None = None
                 "runs_total": len(runs),
                 "skip_duplicates": p.skip_duplicates,
                 "duplicates_skipped": n_dup,
+                "pdf": pdf_name,
             }
             write_reports(out_dir, video, slides, files, meta)
         except BaseException:
@@ -157,7 +172,8 @@ def process(video: str, out_dir: str | None = None, params: Params | None = None
                 shutil.rmtree(tmp, ignore_errors=True)
         if progress is not None:
             progress(1.0, f"Готово: {len(slides)} " + plural(len(slides), "слайд", "слайда", "слайдов"))
-        return Result(video, out_dir, slides, files, layout, mode, seconds, meta)
+        return Result(video, out_dir, slides, files, layout, mode, seconds, meta,
+                      pdf=os.path.join(out_dir, pdf_name) if pdf_name else None)
     finally:
         src.close()
 

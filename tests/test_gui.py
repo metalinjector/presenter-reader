@@ -79,3 +79,50 @@ def test_main_window_uses_given_settings(app, tmp_path):
     w.sw_dups.click()
     assert settings.value("skip_duplicates") == "true"
     w.close()
+
+
+def test_pdf_switch(app, tmp_path):
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.IniFormat)
+    w = gui.MainWindow(settings)
+    assert not w.sw_pdf.isChecked() and w.params().pdf is False
+    w.sw_pdf.click()
+    assert settings.value("pdf") == "true" and w.params().pdf is True
+    w.close()
+    w = gui.MainWindow(settings)                    # настройка запоминается
+    assert w.sw_pdf.isChecked()
+    w.close()
+
+
+def test_result_buttons_fit(app, tmp_path):
+    # Узкое окно — у кнопок «Открыть папку», «Отчёт», «PDF» остаются одни значки,
+    # чтобы подписи не обрезались; широкое — подписи на месте.
+    w = gui.MainWindow(QSettings(str(tmp_path / "settings.ini"), QSettings.IniFormat))
+    w.resize(980, 620)
+    w.show()
+    _wait(100)
+    assert all(btn.text() == "" for btn, _ in w.results.actions)
+    w.resize(1600, 900)
+    _wait(100)
+    assert [btn.text() for btn, _ in w.results.actions] == [text for _, text in w.results.actions]
+    w.close()
+
+
+def test_gallery_uses_full_width(app, tmp_path):
+    # Регрессия: колонки считались по видимой ширине, а QListView заранее оставляет место
+    # под полосу прокрутки — последняя колонка не помещалась, справа оставалась пустота.
+    from PySide6.QtGui import QStandardItem
+    w = gui.MainWindow(QSettings(str(tmp_path / "settings.ini"), QSettings.IniFormat))
+    w.resize(1240, 780)
+    w.show()
+    r = w.results
+    r.stack.setCurrentIndex(1)
+    _wait(50)
+    r._fit_grid()                                   # как в show_job: сетка — до того, как добавлены слайды
+    for i in range(12):                             # столько, что нужна прокрутка
+        r.model.appendRow(QStandardItem(str(i)))
+    _wait(200)
+    xs = {r.view.visualRect(r.model.index(i, 0)).x() for i in range(12)}
+    grid = r.view.gridSize().width()
+    assert r.view.verticalScrollBar().isVisible()
+    assert r.view.viewport().width() - len(xs) * grid < 50     # карточки занимают всю ширину
+    w.close()

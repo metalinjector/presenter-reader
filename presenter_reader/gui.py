@@ -128,6 +128,7 @@ _SVG = {
     "image": '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-8 9"/>',
     "report": '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
     "layers": '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
+    "pages": '<rect x="4" y="7" width="12" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2"/>',
     "plus": '<path d="M12 5v14M5 12h14"/>',
     "refresh": '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
 }
@@ -687,6 +688,29 @@ class ResultsView(QWidget):
         self.subtitle = QLabel()
         self.subtitle.setObjectName("Muted")
         titles.addWidget(self.subtitle)
+        titles.addStretch()
+        # Действия с результатом — под заголовком, слева от превью области: в ряду со
+        # сводкой им не хватает места.
+        self.actions_row = QHBoxLayout()
+        self.actions_row.setSpacing(8)
+        self.btn_dir = QPushButton()
+        self.btn_dir.setToolTip("Открыть папку со слайдами")
+        self.btn_dir.clicked.connect(lambda: self._open(self.job.out_dir if self.job else None))
+        self.btn_report = QPushButton()
+        self.btn_report.setToolTip("HTML-отчёт с тайм-кодами")
+        self.btn_report.clicked.connect(lambda: self._open(
+            os.path.join(self.job.out_dir, "index.html") if self.job else None))
+        self.btn_pdf = QPushButton()
+        self.btn_pdf.setToolTip("Все слайды по порядку показа в одном PDF")
+        self.btn_pdf.clicked.connect(lambda: self._open(
+            self.job.result.pdf if self.job and self.job.result else None))
+        self.actions = [(self.btn_dir, " Открыть папку"), (self.btn_report, " Отчёт"),
+                        (self.btn_pdf, " PDF")]
+        for btn, text in self.actions:
+            btn.setText(text)
+            self.actions_row.addWidget(btn)
+        self.actions_row.addStretch()
+        titles.addLayout(self.actions_row)
         head.addLayout(titles, 1)
         self.layout_thumb = ClickLabel()
         self.layout_thumb.setFixedSize(192, 108)
@@ -704,14 +728,6 @@ class ResultsView(QWidget):
         for w in (self.st_slides, self.st_repeats, self.st_region, self.st_time):
             stats.addWidget(w)
         stats.addStretch()
-        self.btn_dir = QPushButton(" Открыть папку")
-        self.btn_dir.clicked.connect(lambda: self._open(self.job.out_dir if self.job else None))
-        stats.addWidget(self.btn_dir)
-        self.btn_report = QPushButton(" Отчёт")
-        self.btn_report.setToolTip("HTML-отчёт с тайм-кодами")
-        self.btn_report.clicked.connect(lambda: self._open(
-            os.path.join(self.job.out_dir, "index.html") if self.job else None))
-        stats.addWidget(self.btn_report)
         pl.addLayout(stats)
         self.view = QListView()
         self.view.setViewMode(QListView.IconMode)
@@ -761,14 +777,30 @@ class ResultsView(QWidget):
         self.empty_icon.setPixmap(svg_icon("layers", theme["faint"], 56, 1.4).pixmap(56, 56))
         self.btn_dir.setIcon(svg_icon("folder", theme["text"], 18))
         self.btn_report.setIcon(svg_icon("report", theme["text"], 18))
+        self.btn_pdf.setIcon(svg_icon("pages", theme["text"], 18))
         self.view.viewport().update()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self._fit_grid()
+        self._fit_actions()
+
+    def _fit_actions(self):
+        """Кнопки действий с подписями, если помещаются слева от превью, иначе одни значки."""
+        for btn, text in self.actions:
+            btn.setText(text)
+        avail = self.width() - 4 - 16 - self.layout_thumb.width()   # отступ, промежуток, превью
+        if self.actions_row.sizeHint().width() > avail:
+            for btn, _ in self.actions:
+                btn.setText("")
 
     def _fit_grid(self):
-        avail = self.view.viewport().width() - 4
+        # Ширину берём так же, как сам QListView при раскладке: область без полосы прокрутки
+        # минус ширина полосы по стилю — это место он оставляет всегда, даже пока полосы нет.
+        # По видимой ширине последняя колонка не помещалась и галерея теряла столбец.
+        v = self.view
+        sb = v.style().pixelMetric(QStyle.PM_ScrollBarExtent, None, v.verticalScrollBar())
+        avail = v.maximumViewportSize().width() - sb - 4
         cols = max(1, avail // 250)
         w = max(220, avail // cols)
         h = int((w - 28) * 9 / 16) + 58
@@ -824,6 +856,8 @@ class ResultsView(QWidget):
         self.st_region.value.setText(f"{w}×{h}")
         self.st_region.setToolTip(f"x={x}, y={y}, {w}×{h} — способ: {res.layout.method}")
         self.st_time.value.setText(human_duration(res.seconds))
+        self.btn_pdf.setVisible(bool(res.pdf and os.path.exists(res.pdf)))
+        self._fit_actions()
         lp = self._layout_path()
         if lp and os.path.exists(lp):
             pm = QPixmap(lp).scaled(192, 108, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -1131,6 +1165,17 @@ class MainWindow(QMainWindow):
         self.sw_dups.toggled.connect(
             lambda on: self.settings.setValue("skip_duplicates", "true" if on else "false"))
         left.addWidget(self.sw_dups)
+        self.sw_pdf = Switch("Сохранять слайды в PDF")
+        self.sw_pdf.setToolTip(
+            "Все скриншоты слайдов по порядку показа собираются в один PDF —\n"
+            "«<имя видео>_slides.pdf» в папке с результатами. Картинки кладутся\n"
+            "в PDF как есть, без пересжатия: пиксели те же, что в PNG.\n\n"
+            "Действует для следующих обработок; готовое видео можно обработать заново\n"
+            "кнопкой ↻ на его карточке.")
+        self.sw_pdf.setChecked(self.settings.value("pdf", "false") in (True, "true"))
+        self.sw_pdf.toggled.connect(
+            lambda on: self.settings.setValue("pdf", "true" if on else "false"))
+        left.addWidget(self.sw_pdf)
         self.btn_go = QPushButton()
         self.btn_go.setObjectName("Primary")
         self.btn_go.setCursor(Qt.PointingHandCursor)
@@ -1170,8 +1215,9 @@ class MainWindow(QMainWindow):
         self.btn_theme.setIcon(svg_icon("sun" if self.theme_name == "dark" else "moon", t["muted"], 20))
         self.btn_settings.setIcon(svg_icon("settings", t["muted"], 20))
         self.drop.apply_theme(t)
-        self.sw_dups.theme = t
-        self.sw_dups.update()
+        for sw in (self.sw_dups, self.sw_pdf):
+            sw.theme = t
+            sw.update()
         self.results.apply_theme(t)
         for j in self.jobs:
             if j.card:
@@ -1272,6 +1318,7 @@ class MainWindow(QMainWindow):
                       similar_threshold=float(s.value("similar", 80)),
                       merge_builds=s.value("merge_builds", "true") in (True, "true"),
                       skip_duplicates=s.value("skip_duplicates", "false") in (True, "true"),
+                      pdf=s.value("pdf", "false") in (True, "true"),
                       mode="sequential" if s.value("thorough", "false") in (True, "true") else "auto")
 
     def out_dir_for(self, video: str) -> str:
