@@ -23,11 +23,10 @@
 
 ## Шаг 1. Скачать
 
-Репозиторий публичный, входить в GitHub и получать ключи не нужно. Код лежит в ветке по умолчанию
-`claude/pensive-euler-er1v42`.
+Репозиторий публичный, входить в GitHub и получать ключи не нужно. Рабочая ветка — `main`.
 
 ```bash
-git clone https://github.com/metalinjector/presenter-reader.git
+git clone -b main https://github.com/metalinjector/presenter-reader.git
 cd presenter-reader
 ```
 
@@ -35,9 +34,9 @@ cd presenter-reader
 
 ```bash
 curl -L -o presenter-reader.zip \
-  https://github.com/metalinjector/presenter-reader/archive/refs/heads/claude/pensive-euler-er1v42.zip
+  https://github.com/metalinjector/presenter-reader/archive/refs/heads/main.zip
 unzip presenter-reader.zip
-cd presenter-reader-claude-pensive-euler-er1v42
+cd presenter-reader-main
 ```
 
 **Ожидается:** в текущей папке есть `presenter_reader/`, `tests/`, `requirements.txt`, `README.md`
