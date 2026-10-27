@@ -8,10 +8,9 @@ import shutil
 import time
 from dataclasses import dataclass, field
 
-import cv2
 import numpy as np
 
-from .imageops import Comparator
+from .imageops import Comparator, write_png
 from .layout import Layout, Survey
 from .report import draw_layout, plural, save_slides, write_reports
 from .slides import Slide, assemble
@@ -202,4 +201,4 @@ def _save_layout_preview(src, layout: Layout, slides: list[Slide], out_dir: str,
     else:
         dyn = None
     img = draw_layout(fr.bgr(), layout.rect, dyn)
-    cv2.imwrite(os.path.join(out_dir, "layout.png"), img)
+    write_png(os.path.join(out_dir, "layout.png"), img)

@@ -165,6 +165,18 @@ def _argmin_accumulate(a: np.ndarray) -> np.ndarray:
     return out
 
 
+def write_png(path: str, img: np.ndarray, compression: int = 3) -> bool:
+    """Сохранить PNG по любому пути.
+
+    cv2.imwrite в Windows не умеет пути с кириллицей (молча возвращает False),
+    поэтому кодируем в память и пишем файл средствами numpy.
+    """
+    ok, buf = cv2.imencode(".png", img, [cv2.IMWRITE_PNG_COMPRESSION, compression])
+    if ok:
+        buf.tofile(path)
+    return bool(ok)
+
+
 def median_image(images: list[np.ndarray]) -> np.ndarray:
     """Поэлементная медиана — убирает курсор, если он двигался."""
     if len(images) == 1:

@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from .imageops import Comparator, downscale, median_image
+from .imageops import Comparator, downscale, median_image, write_png
 from .layout import Layout
 from .video import Frame
 
@@ -221,7 +221,7 @@ class Tracker:
             img = median_image(caps)
             path = os.path.join(self.tmp_dir, f"run_{run.idx:06d}.png")
             self._writes.append(self._writer.submit(
-                cv2.imwrite, path, img, [cv2.IMWRITE_PNG_COMPRESSION, 3]))
+                write_png, path, img))
             run.image_path = path
         run.caps = []
         run.key_caps = []
