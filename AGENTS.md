@@ -104,7 +104,7 @@ PY -m tests.evaluate demo/mini_g2_b0.mp4                 # 4: сверка с э
 
 **Ожидается:**
 
-1. `12 passed`.
+1. `16 passed`.
 2. Строка `…mini_g2_b0.mp4: 33 s, screens = 5`.
 3. `Найдено слайдов: 5`. Один из них повтор: `slide_004_…_repeat-of-001_sim-100pct.png`.
 4. JSON-строка с `"ok": true`, а последней строкой — `ALL OK`.
@@ -210,9 +210,10 @@ for s, f in zip(res.slides, res.files):
   PY -m tests.gui_smoke demo/mini_g2_b0.mp4 --shot gui.png
   ```
 
-  Скрипт открывает окно в режиме offscreen, обрабатывает видео, сохраняет снимок окна в `gui.png`
-  и печатает `OK: слайдов 5, …` (при настройках окна по умолчанию); код выхода `0`. Снимок можно
-  посмотреть, чтобы оценить интерфейс.
+  Скрипт открывает окно в режиме offscreen с временными настройками по умолчанию (настройки
+  пользователя не читаются и не меняются), обрабатывает видео, сохраняет снимок окна в `gui.png`
+  и печатает `OK: слайдов 5, …`; код выхода `0`. Снимок можно посмотреть, чтобы оценить
+  интерфейс.
 
 ## Если что-то пошло не так
 
@@ -222,7 +223,7 @@ for s, f in zip(res.slides, res.files):
 | `ImportError: libEGL.so.1` (или `libxkbcommon`, `libfontconfig`) | на Linux нет системных библиотек Qt — см. шаг 2 |
 | `Could not load the Qt platform plugin "xcb"` | нет дисплея: для проверки задай `QT_QPA_PLATFORM=offscreen`; на рабочем столе Linux поставь `libxcb-cursor0` |
 | `No module named av` | PyAV не установился: `PY -m pip install av`. Без него программа работает через OpenCV, но заметно медленнее |
-| pytest пишет `skipped` | нет ffmpeg в PATH, сквозные тесты пропущены. Это не ошибка программы |
+| pytest пишет `skipped` | нет ffmpeg в PATH — пропущены сквозные тесты; нет PySide6 или системных библиотек Qt — пропущены тесты интерфейса. Это не ошибка программы |
 | `No module named PIL` в `tests.synth` | `PY -m pip install Pillow` |
 | `tests.synth` падает с ошибкой ffmpeg | нет ffmpeg или в нём нет libx264 |
 | В `layout.png` рамка не на слайде | `--roi X,Y,W,H` |
@@ -241,6 +242,8 @@ for s, f in zip(res.slides, res.files):
   PY -m tests.evaluate vids/*.mp4
   ```
 
+- Исправив ошибку, запиши разбор в [CHANGELOG.md](CHANGELOG.md), в раздел «Не выпущено»:
+  симптом, причина, решение, проверка.
 - Не добавляй в git видео и результаты обработки (`*_slides/`, `demo/`, `vids/`).
 - Комментарии, сообщения и тексты интерфейса пиши на русском, как в остальном коде.
 - Карта модулей — в конце [README.md](README.md).

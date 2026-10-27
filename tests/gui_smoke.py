@@ -5,13 +5,17 @@
 Открывает главное окно в режиме offscreen, добавляет видео в очередь, ждёт
 окончания обработки, печатает итог и сохраняет снимок окна. Код выхода 0 —
 окно открылось и видео обработано, 1 — ошибка или не уложились в время.
+Окно запускается с временными настройками по умолчанию: настройки пользователя
+не читаются и не меняются.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
+import tempfile
 import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -24,7 +28,7 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=600, help="сколько секунд ждать")
     args = ap.parse_args()
 
-    from PySide6.QtCore import QTimer
+    from PySide6.QtCore import QSettings, QTimer
     from PySide6.QtWidgets import QApplication
 
     from presenter_reader import gui
@@ -32,7 +36,11 @@ def main() -> int:
     app = QApplication(sys.argv[:1])
     app.setStyle("Fusion")
     app.setFont(gui._pick_font())
-    w = gui.MainWindow()
+    # Свои, временные настройки: проверка не зависит от того, что пользователь
+    # включил в окне (например, «Не сохранять дубли»), и ничего туда не записывает.
+    tmp = tempfile.mkdtemp(prefix="pr_gui_smoke_")
+    settings = QSettings(os.path.join(tmp, "settings.ini"), QSettings.IniFormat)
+    w = gui.MainWindow(settings)
     w.resize(1280, 800)
     w.show()
     t0 = time.monotonic()
@@ -61,6 +69,8 @@ def main() -> int:
     w.start()   # если автозапуск в настройках выключен
     QTimer.singleShot(300, poll)
     app.exec()
+    settings.sync()
+    shutil.rmtree(tmp, ignore_errors=True)
     return state["code"]
 
 

@@ -257,8 +257,11 @@ class Switch(QCheckBox):
     def __init__(self, text: str = "", parent=None):
         super().__init__(text, parent)
         self.setCursor(Qt.PointingHandCursor)
-        self._pos = 0.0
-        self._anim = QPropertyAnimation(self, b"pos", self)
+        self._pos = 0.0          # положение кружка: 0 — слева (выключено), 1 — справа
+        # Свойство называется knob, а не pos: у QWidget уже есть свойство pos (QPoint,
+        # положение виджета). Анимация по b"pos" двигала бы сам переключатель в угол
+        # родителя, а кружок оставался бы на месте.
+        self._anim = QPropertyAnimation(self, b"knob", self)
         self._anim.setDuration(160)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self.toggled.connect(self._animate)
@@ -269,14 +272,14 @@ class Switch(QCheckBox):
         self._anim.setEndValue(1.0 if on else 0.0)
         self._anim.start()
 
-    def get_pos(self):
+    def get_knob(self):
         return self._pos
 
-    def set_pos(self, v):
-        self._pos = v
+    def set_knob(self, v):
+        self._pos = float(v)
         self.update()
 
-    pos = Property(float, get_pos, set_pos)
+    knob = Property(float, get_knob, set_knob)
 
     def sizeHint(self):
         fm = self.fontMetrics()
@@ -286,8 +289,11 @@ class Switch(QCheckBox):
         return self.rect().contains(pos)
 
     def setChecked(self, on):
+        """Программная установка — сразу, без анимации (клик мышью анимируется)."""
         super().setChecked(on)
+        self._anim.stop()
         self._pos = 1.0 if on else 0.0
+        self.update()
 
     def paintEvent(self, _):
         t = self.theme
@@ -1018,9 +1024,13 @@ class SettingsDialog(QDialog):
 # ---------------------------------------------------------------- главное окно
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, settings: QSettings | None = None):
+        """``settings`` — хранилище настроек; по умолчанию настройки пользователя
+        (реестр в Windows, файл конфигурации в Linux/macOS). Тесты передают своё."""
         super().__init__()
-        self.settings = QSettings("PresenterReader", "PresenterReader")
+        if settings is None:
+            settings = QSettings("PresenterReader", "PresenterReader")
+        self.settings = settings
         self.theme_name = self.settings.value("theme", "") or _system_theme()
         self.theme = THEMES[self.theme_name]
         self.jobs: list[Job] = []
