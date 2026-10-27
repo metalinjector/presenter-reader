@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "presenter-reader"
+version = "0.1.0"
+description = "Находит в записи вебинара область презентации и сохраняет по скриншоту на каждый слайд"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.22",
+    "opencv-python-headless>=4.6",
+    "av>=10.0",
+]
+
+[project.optional-dependencies]
+gui = ["PySide6-Essentials>=6.5"]
+dev = ["pytest>=7", "Pillow>=9"]
+
+[project.scripts]
+presenter-reader = "presenter_reader.cli:main"
+
+[project.gui-scripts]
+presenter-reader-gui = "presenter_reader.gui:main"
+
+[tool.setuptools]
+packages = ["presenter_reader"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
