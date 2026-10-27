@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from .imageops import Comparator
+from .imageops import Comparator, block_sum, structure_map
 from .tracker import Run
 
 
@@ -31,6 +31,7 @@ class Slide:
     states: int = 1                           # сколько шагов анимации склеено
     repeat_of: int | None = None
     similarity: float | None = None
+    before: Run | None = None                 # состояние до последнего «шага анимации»
 
     @property
     def t_start(self) -> float:
@@ -73,10 +74,18 @@ def _is_live_video(run: Run, runs: list[Run], window: float = 4.0, short: float 
     return min(before, after) >= 0.5 or (run.busy_frac >= 0.5 and max(before, after) >= 0.5)
 
 
+def _is_blank(run: Run, cmp: Comparator) -> bool:
+    """Пустая картинка (чёрная заставка, белый экран) — не слайд."""
+    s = structure_map(run.ref)
+    if run.mask is not None:
+        s &= run.mask
+    return int((block_sum(s, cmp.block) >= cmp.min_px).sum()) < 3
+
+
 def assemble(runs: list[Run], cmp: Comparator, min_duration: float, merge_builds: bool = True,
              similar_threshold: float = 80.0, merge_gap: float = 10.0) -> list[Slide]:
     cands = [r for r in runs if r.duration >= min_duration and r.image_path]
-    cands = [r for r in cands if not _is_live_video(r, runs)]
+    cands = [r for r in cands if not _is_live_video(r, runs) and not _is_blank(r, cmp)]
 
     groups: list[Slide] = []
     for r in cands:
@@ -92,12 +101,20 @@ def assemble(runs: list[Run], cmp: Comparator, min_duration: float, merge_builds
                 continue
             if merge_builds and cmp.contains(r.ref, g.run.ref, mask):
                 g.shows.append((r.t_start, r.t_end))  # добавились элементы — шаг анимации
-                g.run = r
+                g.before, g.run = g.run, r
                 g.states += 1
                 continue
             if merge_builds and cmp.contains(g.run.ref, r.ref, mask):
-                g.shows.append((r.t_start, r.t_end))  # шаг назад в анимации
+                g.shows.append((r.t_start, r.t_end))  # шаг назад
                 g.states += 1
+                # Вернулись ровно к прежнему состоянию — значит, «добавка» была временной
+                # (всплывающее уведомление, подсказка), а не шагом анимации: для
+                # скриншота берём чистое состояние.
+                b = g.before
+                if b is not None and cmp.is_same(r.ref, b.ref, _mask(b, r)):
+                    g.run = r if r.duration > b.duration else b
+                    g.before = None
+                    g.states -= 2
                 continue
         groups.append(Slide(0, r, [(r.t_start, r.t_end)]))
 

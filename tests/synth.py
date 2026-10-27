@@ -62,6 +62,7 @@ class Shown:
     visible: int
     duration: float
     fade: float = 0.0
+    toast: tuple | None = None     # (сдвиг от начала показа, длительность) всплывающего уведомления
 
 
 @dataclass
@@ -235,6 +236,15 @@ def make_scenario(name: str, seed: int = 0) -> Scenario:
                        Shown(2, full(2), 20, fade=0.5), Shown(3, full(3), 18), Shown(4, full(4), 16),
                        Shown(1, full(1), 10), Shown(5, full(5), 18, fade=0.5), Shown(6, full(6), 15)]
         sc.cursor_periods = [(20, 40), (100, 130)]
+    elif name == "toast":
+        # чёрная заставка, всплывающее уведомление поверх слайда, анимация пунктов
+        slides = _deck(4, seed + 80)
+        sc = Scenario(name, W, H, (0, 90, 960, 540), (970, 10, 300, 169), None, slides)
+        full = lambda i: len(slides[i].bullets)  # noqa: E731
+        sc.timeline = [("blank", 5), Shown(0, full(0), 14, toast=(5, 4)), Shown(1, 1, 6),
+                       Shown(1, full(1), 12), Shown(2, full(2), 12, fade=0.5, toast=(3, 4)),
+                       Shown(3, full(3), 10)]
+        sc.cursor_periods = [(30, 38)]
     elif name == "mini":
         # короткий ролик для автотестов: анимация, повтор, курсор, камера сбоку
         slides = _deck(4, seed + 70)
@@ -289,7 +299,7 @@ def expected(sc: Scenario) -> dict:
             shows.append({"sid": item.sid, "visible": item.visible, "start": t, "end": t + item.duration})
             t += item.duration
         else:
-            t += item[1]
+            t += item[1]   # камера на весь экран или пустой экран — слайдов нет
     unique: list[int] = []
     for s in shows:
         if s["sid"] not in unique:
@@ -354,7 +364,7 @@ def render(sc: Scenario, out_path: str, fps: float = 15, gop_seconds: float = 2.
             prev = item
             t += item.duration
         else:
-            segs.append((t, t + item[1], None, None))
+            segs.append((t, t + item[1], item[0], None))
             prev = None
             t += item[1]
 
@@ -383,8 +393,14 @@ def render(sc: Scenario, out_path: str, fps: float = 15, gop_seconds: float = 2.
         tt = fi / fps
         seg = next(s for s in segs if s[0] <= tt < s[1]) if tt < segs[-1][1] else segs[-1]
         a, b, item, prev = seg
-        if item is None:
+        if item == "camera":
             frame = bigcam.frame(tt)
+        elif item == "blank":
+            frame = base.copy()
+            frame[sy:sy + sh, sx:sx + sw] = 0
+            if cam is not None:
+                cx, cy, cw, ch = sc.cam_rect
+                frame[cy:cy + ch, cx:cx + cw] = cam.frame(tt)
         else:
             frame = base.copy()
             cur = slide_img(item.sid, item.visible)
@@ -392,6 +408,12 @@ def render(sc: Scenario, out_path: str, fps: float = 15, gop_seconds: float = 2.
                 alpha = (tt - a) / item.fade
                 cur = cv2.addWeighted(slide_img(prev.sid, prev.visible), 1 - alpha, cur, alpha, 0)
             frame[sy:sy + sh, sx:sx + sw] = cur
+            if item.toast and item.toast[0] <= tt - a < item.toast[0] + item.toast[1]:
+                tx, ty = sx + sw - 330, sy + sh - 90
+                cv2.rectangle(frame, (tx, ty), (tx + 310, ty + 70), (60, 60, 60), -1)
+                cv2.rectangle(frame, (tx, ty), (tx + 310, ty + 70), (120, 120, 120), 1)
+                cv2.putText(frame, "Ivan joined the meeting", (tx + 16, ty + 42),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
             if cam is not None:
                 cx, cy, cw, ch = sc.cam_rect
                 frame[cy:cy + ch, cx:cx + cw] = cam.frame(tt)

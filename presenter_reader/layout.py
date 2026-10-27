@@ -535,16 +535,20 @@ def _refine_edges(bg, mad, dyn, changed, rect, block):
             surround = max(colors, key=lambda c: len(sides_with(c)))
             support = sides_with(surround)
         for side in _SIDES:
+            # 1) чистый кандидат цвета подложки; 2) «грязный» того же цвета, если этот
+            # цвет подтверждён другой стороной; 3) край кадра; 4) оставить как есть
             pick = None
             for x, c in clean[side]:
-                if c is None or surround is None or abs(c - surround) <= 12:
+                if c is not None and (surround is None or abs(c - surround) <= 12):
                     pick = x
                     break
-            if pick is None and surround is not None and len(support - {side}) >= 2:
+            if pick is None and surround is not None and support - {side}:
                 dirty = [x for x, c, d in cands[side]
                          if d and c is not None and abs(c - surround) <= 12]
                 if dirty:
                     pick = min(dirty)
+            if pick is None:
+                pick = next((x for x, c, _ in cands[side] if c is None), None)
             if pick is not None:
                 rect = _set_side(rect, side, pick, W, H)
     return rect

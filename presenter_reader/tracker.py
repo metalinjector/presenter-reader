@@ -226,6 +226,8 @@ class Tracker:
         run.caps = []
         run.key_caps = []
         run.first = []
+        if run.image_path is None:
+            run.ref = run.mask = None   # короткий прогон: нужны только его границы во времени
         self.runs.append(run)
         self.cur = None
 
