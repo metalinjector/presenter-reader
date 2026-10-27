@@ -129,6 +129,7 @@ _SVG = {
     "report": '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
     "layers": '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
     "plus": '<path d="M12 5v14M5 12h14"/>',
+    "refresh": '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
 }
 
 
@@ -410,6 +411,7 @@ class JobCard(QFrame):
     selected = Signal(object)
     remove = Signal(object)
     open_dir = Signal(object)
+    rerun = Signal(object)
 
     def __init__(self, job: Job, theme: dict, parent=None):
         super().__init__(parent)
@@ -445,6 +447,10 @@ class JobCard(QFrame):
         line2.addWidget(self.info, 1)
         texts.addLayout(line2)
         top.addLayout(texts, 1)
+        self.btn_again = QToolButton()
+        self.btn_again.setToolTip("Обработать заново с текущими настройками")
+        self.btn_again.clicked.connect(lambda: self.rerun.emit(self.job))
+        top.addWidget(self.btn_again, 0, Qt.AlignTop)
         self.btn_dir = QToolButton()
         self.btn_dir.setToolTip("Открыть папку со слайдами")
         self.btn_dir.clicked.connect(lambda: self.open_dir.emit(self.job))
@@ -473,6 +479,7 @@ class JobCard(QFrame):
         acc = QColor(theme["accent"])
         self.ico.setStyleSheet(f"background: rgba({acc.red()},{acc.green()},{acc.blue()},36); border-radius: 11px;")
         self.ico.setPixmap(svg_icon("film", theme["accent"], 20).pixmap(20, 20))
+        self.btn_again.setIcon(svg_icon("refresh", theme["muted"], 18))
         self.btn_dir.setIcon(svg_icon("folder", theme["muted"], 18))
         self.btn_rm.setIcon(svg_icon("x", theme["muted"], 18))
         self.refresh()
@@ -502,6 +509,7 @@ class JobCard(QFrame):
 
     def refresh(self):
         j, t = self.job, self.theme
+        self.btn_again.setVisible(j.status in ("done", "error", "cancelled"))
         self.btn_dir.setVisible(j.status == "done")
         self.btn_rm.setVisible(j.status != "running")
         self.bar.setVisible(j.status in ("running", "queued") and j.progress > 0 or j.status == "running")
@@ -579,20 +587,24 @@ class SlideDelegate(QStyledItemDelegate):
         f.setPixelSize(12)
         p.setFont(f)
         p.setPen(QColor(t["muted"]))
-        p.drawText(QRectF(r.left() + 56, y, r.width() - 70, 20), Qt.AlignLeft | Qt.AlignVCenter,
-                   f"{data.get('time', '')} · {data.get('shown', '')}")
+        caption = f"{data.get('time', '')} · {data.get('shown', '')}"
+        p.drawText(QRectF(r.left() + 56, y, r.width() - 70, 20), Qt.AlignLeft | Qt.AlignVCenter, caption)
+        n = data.get("appearances", 1)
+        if n > 1:   # дубли не сохранялись — сколько раз слайд показывали
+            x = r.left() + 56 + p.fontMetrics().horizontalAdvance(caption + " · ")
+            p.setPen(QColor(t["accent"]))
+            p.drawText(QRectF(x, y, r.right() - x - 8, 20), Qt.AlignLeft | Qt.AlignVCenter,
+                       f"{n} {plural(n, 'показ', 'показа', 'показов')}")
         rep = data.get("repeat")
         if rep:
+            # пометка повтора — внизу миниатюры, чтобы не закрывать заголовок слайда
             text = f"повтор №{rep[0]} · {rep[1]:.0f}%"
-            fm = p.fontMetrics()
-            w = fm.horizontalAdvance(text) + 16
-            badge = QRectF(img_r.right() - w - 6, img_r.top() + 6, w, 20)
-            c = QColor(t["warn"])
-            bg = QColor(0, 0, 0, 150)
+            w = p.fontMetrics().horizontalAdvance(text) + 16
+            badge = QRectF(img_r.right() - w - 6, img_r.bottom() - 26, w, 20)
             path = QPainterPath()
             path.addRoundedRect(badge, 10, 10)
-            p.fillPath(path, bg)
-            p.setPen(c)
+            p.fillPath(path, QColor(0, 0, 0, 160))
+            p.setPen(QColor(t["warn"]))
             p.drawText(badge, Qt.AlignCenter, text)
         p.restore()
 
@@ -794,8 +806,14 @@ class ResultsView(QWidget):
         reps = sum(1 for s in res.slides if s.repeat_of)
         self.st_slides.value.setText(str(n))
         self.st_slides.label.setText(plural(n, "слайд", "слайда", "слайдов"))
-        self.st_repeats.value.setText(str(reps))
-        self.st_repeats.label.setText(plural(reps, "повтор", "повтора", "повторов"))
+        if res.info.get("skip_duplicates"):
+            dups = res.info.get("duplicates_skipped", 0)
+            self.st_repeats.value.setText(str(dups))
+            self.st_repeats.label.setText(plural(dups, "дубль пропущен", "дубля пропущено",
+                                                 "дублей пропущено"))
+        else:
+            self.st_repeats.value.setText(str(reps))
+            self.st_repeats.label.setText(plural(reps, "повтор", "повтора", "повторов"))
         x, y, w, h = res.layout.rect
         self.st_region.value.setText(f"{w}×{h}")
         self.st_region.setToolTip(f"x={x}, y={y}, {w}×{h} — способ: {res.layout.method}")
@@ -813,7 +831,7 @@ class ResultsView(QWidget):
             it = QStandardItem()
             path = os.path.join(res.out_dir, f)
             it.setData({"number": s.number, "time": fmt_time(s.t_start - t0),
-                        "shown": human_duration(s.shown_for),
+                        "shown": human_duration(s.shown_for), "appearances": s.appearances,
                         "repeat": (s.repeat_of, s.similarity) if s.repeat_of else None}, Qt.UserRole)
             it.setData(path, Qt.UserRole + 1)
             it.setToolTip(f"{f}\nПоказан с {fmt_time(s.t_start - t0)}, всего {human_duration(s.shown_for)}")
@@ -1091,6 +1109,18 @@ class MainWindow(QMainWindow):
         self.queue_box.addStretch()
         self.queue_area.setWidget(holder)
         left.addWidget(self.queue_area, 1)
+        self.sw_dups = Switch("Не сохранять дубли")
+        self.sw_dups.setToolTip(
+            "Если ведущий вернулся к слайду и он почти не отличается от уже сохранённого\n"
+            "(сходство от 95 %), скриншот не делается ещё раз — время повторного показа\n"
+            "добавляется к исходному слайду. Повторы с заметными отличиями сохраняются\n"
+            "с пометкой, как обычно.\n\n"
+            "Действует для следующих обработок; готовое видео можно обработать заново\n"
+            "кнопкой ↻ на его карточке.")
+        self.sw_dups.setChecked(self.settings.value("skip_duplicates", "false") in (True, "true"))
+        self.sw_dups.toggled.connect(
+            lambda on: self.settings.setValue("skip_duplicates", "true" if on else "false"))
+        left.addWidget(self.sw_dups)
         self.btn_go = QPushButton()
         self.btn_go.setObjectName("Primary")
         self.btn_go.setCursor(Qt.PointingHandCursor)
@@ -1130,6 +1160,8 @@ class MainWindow(QMainWindow):
         self.btn_theme.setIcon(svg_icon("sun" if self.theme_name == "dark" else "moon", t["muted"], 20))
         self.btn_settings.setIcon(svg_icon("settings", t["muted"], 20))
         self.drop.apply_theme(t)
+        self.sw_dups.theme = t
+        self.sw_dups.update()
         self.results.apply_theme(t)
         for j in self.jobs:
             if j.card:
@@ -1179,6 +1211,7 @@ class MainWindow(QMainWindow):
             card.selected.connect(self.select_job)
             card.remove.connect(self.remove_job)
             card.open_dir.connect(lambda j: QDesktopServices.openUrl(QUrl.fromLocalFile(j.out_dir)))
+            card.rerun.connect(self.rerun_job)
             job.card = card
             self.jobs.append(job)
             self.queue_box.insertWidget(self.queue_box.count() - 1, card)
@@ -1203,6 +1236,18 @@ class MainWindow(QMainWindow):
         self.queue_empty.setVisible(not self.jobs)
         self.update_buttons()
 
+    def rerun_job(self, job: Job):
+        """Поставить готовое (или прерванное) видео в очередь заново с текущими настройками."""
+        if job.status not in ("done", "error", "cancelled"):
+            return
+        job.status, job.progress, job.stage, job.result, job.error = "queued", 0.0, "", None, ""
+        job.card.refresh()
+        if self.selected is job:
+            self.results.show_job(job)
+        if self.current is None:
+            self.start()
+        self.update_buttons()
+
     def select_job(self, job: Job):
         self.selected = job
         for j in self.jobs:
@@ -1216,6 +1261,7 @@ class MainWindow(QMainWindow):
                       min_duration=float(s.value("min_duration", 1.0)),
                       similar_threshold=float(s.value("similar", 80)),
                       merge_builds=s.value("merge_builds", "true") in (True, "true"),
+                      skip_duplicates=s.value("skip_duplicates", "false") in (True, "true"),
                       mode="sequential" if s.value("thorough", "false") in (True, "true") else "auto")
 
     def out_dir_for(self, video: str) -> str:

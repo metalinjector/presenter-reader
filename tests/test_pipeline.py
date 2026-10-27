@@ -54,3 +54,21 @@ def test_manual_roi(mini_video, tmp_path):
     res = process(path, str(tmp_path / "out"), Params(roi=tuple(gt["slide_rect"])))
     assert res.layout.method == "manual"
     assert len(res.slides) == len(gt["screens"])
+
+
+def test_skip_duplicates(mini_video, tmp_path):
+    path, gt = mini_video
+    res = process(path, str(tmp_path / "out"), Params(skip_duplicates=True))
+    screens = gt["screens"]
+    n_rep = sum(1 for e in screens if e["repeat_of"] is not None)
+    assert len(res.slides) == len(screens) - n_rep
+    assert res.info["duplicates_skipped"] == n_rep
+    first = res.slides[0]
+    assert first.appearances == 2 and len(first.shows) >= 2      # показ в начале и возврат
+    pngs = [f for f in os.listdir(res.out_dir) if f.startswith("slide_")]
+    assert len(pngs) == len(res.slides)
+    assert not any("_repeat-of-" in f for f in pngs)
+    with open(os.path.join(res.out_dir, "report.json"), encoding="utf-8") as fh:
+        rep = json.load(fh)
+    assert rep["skip_duplicates"] is True and rep["duplicates_skipped"] == n_rep
+    assert rep["slides"][0]["appearances"] == 2

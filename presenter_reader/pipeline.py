@@ -13,7 +13,7 @@ import numpy as np
 from .imageops import Comparator, write_png
 from .layout import Layout, Survey
 from .report import draw_layout, plural, save_slides, write_reports
-from .slides import Slide, assemble
+from .slides import Slide, assemble, drop_duplicates
 from .tracker import Analyzer, Tracker, _combine
 from .video import open_video
 
@@ -29,6 +29,8 @@ class Params:
     sensitivity: float = 1.0         # >1 — замечать более мелкие изменения
     merge_builds: bool = True        # пошаговую анимацию — одним кадром
     similar_threshold: float = 80.0  # с какого сходства, %, помечать повтор
+    skip_duplicates: bool = False    # не сохранять дубли — почти неотличимые повторы
+    duplicate_threshold: float = 95.0  # с какого сходства, %, повтор считается дублем
     mode: str = "auto"               # auto | keyframes | sequential
     max_keyframe_gap: float = 20.0   # реже опорных кадров — читаем всё подряд
     survey_samples: int = 3000       # сколько выборок брать для поиска области
@@ -122,6 +124,9 @@ def process(video: str, out_dir: str | None = None, params: Params | None = None
             # ------------------------------------------ 3. сборка и сохранение
             report(0.96, "Сохраняю слайды…")
             slides = assemble(runs, cmp, p.min_duration, p.merge_builds, p.similar_threshold)
+            n_dup = 0
+            if p.skip_duplicates:
+                slides, n_dup = drop_duplicates(slides, p.duplicate_threshold)
             for f in os.listdir(out_dir):
                 if _OWN_FILE.match(f):
                     os.remove(os.path.join(out_dir, f))
@@ -140,6 +145,8 @@ def process(video: str, out_dir: str | None = None, params: Params | None = None
                            "h": layout.rect[3], "method": layout.method},
                 "processing_seconds": round(seconds, 1),
                 "runs_total": len(runs),
+                "skip_duplicates": p.skip_duplicates,
+                "duplicates_skipped": n_dup,
             }
             write_reports(out_dir, video, slides, files, meta)
         except BaseException:

@@ -9,7 +9,7 @@ import time
 
 from . import __version__
 from .pipeline import Cancelled, Params, default_out_dir, process
-from .report import fmt_time
+from .report import fmt_time, plural
 
 
 def _time(s: str) -> float:
@@ -44,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "0.5 — грубее (по умолчанию 1)")
     ap.add_argument("--similar", type=float, default=80.0, metavar="%",
                     help="с какого процента сходства помечать слайд как повтор (по умолчанию 80)")
+    ap.add_argument("--skip-duplicates", action="store_true",
+                    help="не сохранять дубли: если ведущий вернулся к слайду и он почти не "
+                         "отличается от сохранённого, скриншот не делается ещё раз, а время "
+                         "повторного показа добавляется к исходному слайду в отчёте")
+    ap.add_argument("--duplicate-threshold", type=float, default=95.0, metavar="%",
+                    help="с какого процента сходства повтор считается дублем (по умолчанию 95)")
     ap.add_argument("--no-merge-builds", action="store_true",
                     help="не склеивать пошаговую анимацию: каждый шаг — отдельный скриншот")
     ap.add_argument("--mode", choices=["auto", "keyframes", "sequential"], default="auto",
@@ -101,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
 
     params = Params(min_duration=args.min_duration, sensitivity=args.sensitivity,
                     similar_threshold=args.similar, merge_builds=not args.no_merge_builds,
+                    skip_duplicates=args.skip_duplicates, duplicate_threshold=args.duplicate_threshold,
                     mode=args.mode, roi=args.roi, start=args.start, end=args.end,
                     backend=args.backend, keep_temp=args.keep_temp)
     code = 0
@@ -122,9 +129,13 @@ def main(argv: list[str] | None = None) -> int:
         x, y, w, h = res.layout.rect
         print(f"Область презентации: x={x} y={y} {w}×{h} ({res.layout.method}); "
               f"режим: {res.mode}; время обработки: {res.seconds:.1f} с")
-        print(f"Найдено слайдов: {len(res.slides)}  →  {res.out_dir}")
+        n_dup = res.info.get("duplicates_skipped", 0)
+        dups = f" (дублей не сохранено: {n_dup})" if n_dup else ""
+        print(f"Найдено слайдов: {len(res.slides)}{dups}  →  {res.out_dir}")
         for s, f in zip(res.slides, res.files):
             extra = f"  (повтор №{s.repeat_of}, сходство {s.similarity:.0f}%)" if s.repeat_of else ""
+            if s.appearances > 1:
+                extra += f"  (показан {s.appearances} {plural(s.appearances, 'раз', 'раза', 'раз')})"
             print(f"  {s.number:3d}. {fmt_time(s.t_start - res.info.get('start', 0))}  {f}{extra}")
     return code
 

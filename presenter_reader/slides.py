@@ -10,6 +10,8 @@
    содержимое предыдущего) склеиваем в один слайд с итоговым кадром.
 4. Для каждого слайда ищем самый похожий из ранее показанных. Повторный показ
    сохраняется ещё раз, но с пометкой «повтор N, сходство X %».
+5. В режиме «без дублей» (``drop_duplicates``) повтор, почти неотличимый от уже
+   сохранённого слайда, не сохраняется: его показы добавляются к исходному слайду.
 """
 
 from __future__ import annotations
@@ -32,6 +34,9 @@ class Slide:
     repeat_of: int | None = None
     similarity: float | None = None
     before: Run | None = None                 # состояние до последнего «шага анимации»
+    appearances: int = 1                      # сколько раз показан (с учётом влитых дублей)
+    best_ref: Slide | None = field(default=None, repr=False)   # самый похожий из прежних
+    best_sim: float | None = None
 
     @property
     def t_start(self) -> float:
@@ -137,9 +142,44 @@ def assemble(runs: list[Run], cmp: Comparator, min_duration: float, merge_builds
             sim = cmp.similarity(s.run.ref, prev.run.ref, _mask(prev.run, s.run))
             if sim > best_sim:
                 best, best_sim = prev, sim
-        if best is not None and best_sim >= similar_threshold:
-            s.repeat_of, s.similarity = best.number, best_sim
+        if best is not None:
+            s.best_ref, s.best_sim = best, best_sim
+            if best_sim >= similar_threshold:
+                s.repeat_of, s.similarity = best.number, best_sim
     return groups
+
+
+def drop_duplicates(slides: list[Slide], threshold: float = 95.0) -> tuple[list[Slide], int]:
+    """Режим «без дублей»: не сохранять повторно показанный слайд, если он почти
+    не отличается от уже сохранённого (сходство ≥ ``threshold`` %).
+
+    Время такого повторного показа добавляется к исходному слайду (``shows``,
+    ``appearances``). Повторы с заметными отличиями остаются с пометкой, номера
+    слайдов пересчитываются подряд. Возвращает (оставшиеся слайды, сколько пропущено).
+    """
+    merged_into: dict[int, Slide] = {}
+
+    def canon(x: Slide | None) -> Slide | None:
+        while x is not None and id(x) in merged_into:
+            x = merged_into[id(x)]
+        return x
+
+    kept: list[Slide] = []
+    for s in slides:
+        orig = canon(s.best_ref)   # исходный мог и сам оказаться влитым дублем
+        if orig is not None and s.best_sim is not None and s.best_sim >= threshold:
+            orig.shows = sorted(orig.shows + s.shows)
+            orig.appearances += s.appearances
+            merged_into[id(s)] = orig
+            continue
+        s.best_ref = orig
+        kept.append(s)
+    for i, s in enumerate(kept, 1):
+        s.number = i
+    for s in kept:
+        if s.repeat_of is not None and s.best_ref is not None:
+            s.repeat_of = s.best_ref.number
+    return kept, len(slides) - len(kept)
 
 
 def _mask(a: Run, b: Run):
